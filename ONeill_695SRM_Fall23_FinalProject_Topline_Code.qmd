@@ -1,0 +1,532 @@
+---
+title: "DACSS 695 Final Topline and Weighting Code - Steve O'Neill"
+format: html
+editor: visual
+---
+
+```{r}
+library(haven)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(tidyverse)
+library(skimr)
+library(descr)
+library(srvyr)
+library(survey)
+library(weights)
+library(anesrake)
+library(data.table)
+library(stargazer)
+library(pollster)
+library(kableExtra)
+library(labelled)
+library(janitor)
+library(rstatix)
+library(flextable)
+library(readxl)
+```
+
+```{r}
+library(haven)
+omni <- read_sav("omni_final (1).sav")
+```
+
+### Q29 How much of a threat do cyberattacks pose to the average U.S. citizen? \[Enormous/No threat/Don't know\]
+
+### Q30 How much of a threat do cyberattacks pose to the average U.S. business? \[Enormous/No threat/Don't know\]
+
+```{r}
+names(omni) #Use this to quickly see what your variables are named 
+skim(omni) #Important to review your data before working with it
+omni<-janitor::clean_names(omni) #Cleans up the names in your data - janitor package 
+#Creates weight variable placeholder 
+omni$weight<-1
+
+#Filter out respondents who failed attention check  
+###Removes attention check failures 
+omni$check<-omni$q9_3+omni$q9_4
+
+omni_pass<-omni %>% #New Data frame to work from  
+  filter(check==2)
+```
+
+```{r}
+attributes(omni_pass$q29) #Tells you the value labels for the variable if they exist - USE
+freq(omni_pass$q29) #Tells you frequency that each response option was selected
+
+```
+
+```{r}
+###Recoding IVs  
+  omni_pass$education<-as.numeric(omni_pass$education) #Changes to numeric 
+
+  omni_pass <- omni_pass %>% #Explicitly making the values -1/-9 NA 
+    mutate(education = replace(education, education <= -1, NA)) #Recodes all values in education variable <0 to NA since all negative values represent non-analyzable data 
+
+  omni_pass <- omni_pass %>% 
+    mutate(college = if_else(education<6, 'No College Degree', 'College Degree'))
+  omni_pass <- omni_pass %>% 
+    mutate(college_n = if_else(education<6, 0, 1))
+  
+  #Collapse into 4 groups - notice new name is educ4 to indicate number of educ groups
+  omni_pass <- omni_pass %>%   
+    mutate(educ4 = case_when(
+      education==1 ~ 'HS or Less',
+      education==2 ~ 'HS or Less',
+      education==3 ~ 'Some College',
+      education==4 ~ 'Some College',
+      education==5 ~ 'Some College',
+      education==6  ~ 'Bachelors',
+      education==7 ~ 'Advanced Degree',
+      education==8 ~ 'Advanced Degree',))
+```
+
+```{r}
+###Recoding Variables 
+  omni_pass <- omni_pass %>%   #Recode with labels for easy table display
+    mutate(life_qual2 = case_when(
+      q26_4==1 ~ 'Agree',
+      q26_4==2 ~ 'Agree',
+      q26_4==3 ~ 'Do not Agree',
+      q26_4==4 ~ 'Do not Agree',
+      q26_4==5 ~ 'Do not Agree',))
+  
+  omni_pass <- omni_pass %>%   #Recode as value for easy graphical display
+    mutate(life_qual2_n = case_when(
+      q26_4==1 ~ 1,
+      q26_4==2 ~ 2,
+      q26_4==3 ~ 0,
+      q26_4==4 ~ 0,
+      q26_4==5 ~ 0,))
+```
+
+
+```{r}
+#filter out rows where q29 or q30 are 6, or "I don't know"
+omni_pass <- omni_pass %>%
+  mutate(q29 = replace(q29, q29 == 6, NA),
+         q30 = replace(q30, q30 == 6, NA)) %>%
+  filter(!is.na(q29) & !is.na(q30))
+#That results in 259 cases down from 289 - acceptable.
+```
+
+```{r}
+freq(omni_pass$q29)
+freq(omni_pass$q30)
+```
+## EDA
+
+```{r}
+#After removing nonresponses
+ggplot(omni_pass, aes(x = factor(q29, levels = 1:6), fill = factor(q29, levels = 1:6))) +
+  geom_bar(stat = "count", position = "stack", width = 0.7) +
+  scale_x_discrete(labels = c("An enormous threat", "A large threat", "A moderate threat", "A small threat", "No threat at all", "Don't know")) +
+  labs(title = "How much of a threat do cyberattacks pose to the average U.S. citizen?",
+       x = "Threat Level",
+       y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 15), legend.position = "none")
+```
+
+```{r}
+ggplot(omni_pass, aes(x = factor(q30, levels = 1:6), fill = factor(q30, levels = 1:6))) + #Businesses threat level
+  geom_bar(stat = "count", width = 0.15) +
+  geom_bar(aes(x = factor(q29, levels = 1:6), fill = factor(q29, levels = 1:6)), #Individual's threat level
+           position = "dodge", stat = "count", width = 0.35, alpha = 0.4) +
+  scale_x_discrete(labels = c("An enormous threat", "A large threat", "A moderate threat", "A small threat", "No threat at all", "Don't know")) +
+  labs(title = "Perception of Cyber Risk: Personal (Transparent) vs. Business (Solid)",
+       x = "Threat Level",
+       y = "Count of Responses") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 15), legend.position = "none")
+```
+
+## Recoding certain variables
+
+```{r}
+omni_pass <- omni_pass %>% #Explicitly making the values -1/-9 NA 
+  mutate(education = replace(education, education <= -1, NA)) #Recodes all values in education variable <0 to NA since all negative values represent non-analyzable data 
+
+#Easily Collapse into dichotomous variable with if_else command
+omni_pass <- omni_pass %>% 
+  mutate(college = if_else(education<6, 'No College Degree', 'College Degree'))
+
+#College - numeric
+omni_pass <- omni_pass %>% 
+  mutate(college_n = if_else(education<6, 0, 1))
+
+#Collapse into 4 groups - notice new name is educ4 to indicate number of educ groups
+omni_pass <- omni_pass %>%   
+  mutate(educ4 = case_when(
+    education==1 ~ 'HS or Less',
+    education==2 ~ 'HS or Less',
+    education==3 ~ 'Some College',
+    education==4 ~ 'Some College',
+    education==5 ~ 'Some College',
+    education==6  ~ 'Bachelors',
+    education==7 ~ 'Advanced Degree',
+    education==8 ~ 'Advanced Degree',))
+
+#Creates Age Group Buckets using the cut function from base r 
+omni_pass$age<-as.numeric(omni_pass$age)
+omni_pass$age_group <- cut(omni_pass$age, breaks = c(18, 30, 40, 50, 65, Inf), labels = c("18-29", "30-40", "40-49", "50-64", "65+"), right = FALSE)
+
+omni_pass <- omni_pass %>%   
+  mutate(ethnicity_5 = case_when(
+    ethnicity==1 ~ 'White',
+    ethnicity==2 ~ 'Black',
+    ethnicity==3 ~ 'Native American',
+    ethnicity==4 ~ 'Asian',
+    ethnicity==5 ~ 'Asian',
+    ethnicity==6  ~ 'Asian',
+    ethnicity==7 ~ 'Asian',
+    ethnicity==8 ~ 'Asian',
+    ethnicity==9 ~ 'Asian',
+    ethnicity==10 ~ 'Asian',
+    ethnicity==11 ~ 'Other Race',
+    ethnicity==12 ~ 'Other Race',
+    ethnicity==13 ~ 'Other Race',
+    ethnicity==14 ~ 'Other Race',
+    ethnicity==15 ~ 'Other Race',
+    ethnicity==16 ~ 'Other Race',))
+
+
+```
+
+```{r}
+ordered_eth <- c("White", "Black", "Asian", "Native American", "Other Race")
+omni_pass$ethnicity_5 <- omni_pass$ethnicity_5 <- factor(omni_pass$ethnicity_5, levels = ordered_eth, ordered = TRUE)
+```
+
+## Weighting
+
+```{r}
+demographic_weights <- read_excel("C:\\Users\\stevenoneill\\Downloads\\dacss695sr\\Demos for Weighting.xlsx")
+demographic_weights
+```
+
+```{r}
+#Gender - numeric
+omni_pass <- omni_pass %>% 
+  mutate(gender_n = as.numeric(gender))
+
+#Age - numeric
+omni_pass <- omni_pass %>% 
+  mutate(age_group_n = as.numeric(age_group))
+
+#Ethnicity - numeric
+omni_pass <- omni_pass %>% 
+  mutate(ethnicity_5_n = as.numeric(ethnicity_5))
+
+#Hispanic - numeric
+omni_pass <- omni_pass %>% 
+  mutate(hispanic_n = as.numeric(hispanic))
+
+#college - already numeric
+```
+
+```{r}
+omni_pass %>% select(gender, gender_n, age_group, age_group_n, ethnicity_5, ethnicity_5_n, hispanic, hispanic_n, college_n)
+```
+```{r}
+unique(omni_pass_df$gender)
+unique(omni_pass_df$age_group_n)
+unique(omni_pass_df$ethnicity_5_n)
+unique(omni_pass_df$hispanic_n)
+unique(omni_pass_df$college_n)
+```
+```{r}
+
+selected_columns <- omni_pass_df %>% select(gender, age_group_n, ethnicity_5_n, hispanic_n, college_n)
+
+#calculate frequency distribution for each column
+calculate_frequency <- function(column) {
+  freq_table <- table(column)
+  return(freq_table)
+}
+
+frequency_distributions <- lapply(selected_columns, calculate_frequency)
+
+print(frequency_distributions)
+```
+```{r}
+#Generate a Topline BEFORE weighting for later comparison
+topline(df = omni_pass, variable = q29, 
+        weight = weight, pct = FALSE, cum_pct=FALSE)
+
+topline(df = omni_pass, variable = q30, 
+        weight = weight, pct = FALSE, cum_pct=FALSE)
+
+```
+
+
+```{r}
+#Save new vectors with target population values for weights 
+gender <- c(0.4830000, 0.5170000)  ##Target values for females and males; label order (male, femaile)
+age_group_n <- c(0.1129870, 0.1597403, 0.3337662, 0.1675325, 0.2259740)   #Target values for 5 age groups "18-29", "30-40", "40-49", "50-64", "65+"
+ethnicity_5_n <-c(0.6410000, 0.1200000, 0.0610000, 0.0130000, 0.1650000) #Target values race/ethnic identities - white, black, asian, native american, other races)
+hispanic_n <-c(0.1680000, 0.8320000) #hispanic, non-hispanic
+college_n <-c(0.6230000, 0.3770000) #Target values education - Order: no college degree, college degree
+
+#Combine the demographic vectors into a list
+targets <- list(gender, age_group_n, ethnicity_5_n, hispanic_n, college_n)
+# remember, these names will have to match the column names & order in the sample data 
+
+names(targets) <- c("gender", "age_group_n", "ethnicity_5_n", "hispanic_n", "college_n")
+
+#data.frame required for anesrake
+omni_pass_df <- as.data.frame(omni_pass)
+
+#Coerce hispanic_n to dichotomous variable
+omni_pass_df <- omni_pass_df %>%
+  mutate(hispanic_n = case_when(
+    hispanic_n == 0 ~ 1,
+    hispanic_n >= 2 ~ 2,
+    hispanic_n == 15 ~ NA, #for those not willing to tell us if they are Hispanic
+    TRUE ~ hispanic_n
+  ))
+
+#Coerce college_n from '0 and 1' to '1 and 2'
+omni_pass_df <- omni_pass_df %>%
+  mutate(college_n = case_when(
+    college_n == 0 ~ 1,
+    college_n == 1 ~ 2, #Anesrake cannot handle anything else apparently
+    TRUE ~ college_n
+  ))
+
+#Remove just 2 rows with NAs in selected columns
+#omni_pass_df <- omni_pass_df[complete.cases(omni_pass_df[, c("gender", "age_group_n", "ethnicity_5_n", "hispanic_n", "college_n")]), ]
+
+#Assess missingness
+#omni_pass_df %>% select("gender", "age_group_n", "ethnicity_5_n", "hispanic_n", "college_n") %>%
+#  summarise_all(~sum(is.na(.)))
+
+myweights <- anesrake(targets, omni_pass_df,
+                     caseid = omni_pass_df$response_id, 
+                     cap = 8, 
+                     type = "pctlim", 
+                     pctlim=.05)
+
+omni_pass_df$full_weight  <- unlist(myweights[1])
+
+summary(omni_pass_df$full_weight)
+```
+### Toplines
+
+```{r}
+#Answers come in scientific notation by default, correct this:
+options(scipen = 999)
+
+#Generate topline AFTER weighting
+topline_individual_weighted <- topline(df = omni_pass_df, variable = q29, 
+        weight = full_weight, pct = FALSE, cum_pct=FALSE) %>% 
+  #Looks Correct
+  mutate(across(c("Frequency", "Valid Percent"), ~round(., 6)))
+topline_individual_weighted
+
+topline_business_weighted <- topline(df = omni_pass_df, variable = q30, 
+        weight = full_weight, pct = FALSE, cum_pct=FALSE) %>% 
+  #Correct
+  mutate(across(c("Frequency", "Valid Percent"), ~round(., 6)))
+
+topline_business_weighted #Good, results are different.
+```
+#### Formatting
+
+```{r}
+#Cool functions!
+
+format_topline <- function(df) {
+  df$Frequency <- round(df$Frequency)
+  df$`Valid Percent` <- sprintf("%.2f%%", df$`Valid Percent`)
+  colnames(df)[colnames(df) == 'Valid Percent'] <- 'Percent'
+  return(df)
+}
+
+create_flextable <- function(data_frame, caption = NULL, footer_lines = NULL) {
+
+  ft <- flextable(data_frame) %>%
+    theme_booktabs() %>%
+    set_caption(caption = caption) %>%
+    add_footer_lines(footer_lines) %>%
+    set_table_properties(layout = "autofit") %>%
+    align(j = 2, align = "center") %>% 
+    font(part = "all", fontname = "Inconsolata")
+
+  return(ft)
+}
+```
+
+```{r}
+ft_topline_business_weighted <- create_flextable(format_topline(topline_business_weighted), caption = "How much of a threat do cyberattacks pose to the average U.S. citizen? (Weighted Results) ")
+
+ft_topline_individual_weighted <- create_flextable(format_topline(topline_individual_weighted), caption = "How much of a threat do cyberattacks pose to the average U.S. business? (Weighted Results)")
+```
+
+#### Exporting
+
+```{r}
+save_as_docx(
+  "Table 1" = ft_topline_business_weighted, 
+  path = "ft_topline_business_weighted.docx")
+```
+
+```{r}
+save_as_docx(
+  "Table 1" = ft_topline_individual_weighted, 
+  path = "ft_topline_individual_weighted.docx")
+```
+
+#### Plotting weighted results
+
+```{r}
+ggplot(topline_business_weighted, aes(x = Response, y = Frequency, fill = Response)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Perception of Cyber Risk: Business (Weighted)",
+       x = "Threat Level",
+       y = "Frequency") +
+  theme_minimal()
+
+ggplot(topline_individual_weighted, aes(x = Response, y = Frequency, fill = Response)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Perception of Cyber Risk: Personal (Weighted)",
+       x = "Threat Level",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+## Crosstabs
+
+
+```{r}
+#moe_fun(.5, 259, 1.96) = 0.06089424
+
+crosstab_age_cyber_individual_weighted <- pollster::crosstab(df = omni_pass_df, x = q29, 
+         y = age_group, weight = full_weight, 
+         pct_type = "col") 
+
+crosstab_age_cyber_business_weighted <- pollster::crosstab(df = omni_pass_df, x = q30, 
+         y = age_group, weight = full_weight, 
+         pct_type = "col") 
+
+crosstab_ethnicity_cyber_individual_weighted <- pollster::crosstab(df = omni_pass_df, x = q29, 
+         y = ethnicity_5, weight = full_weight, 
+         pct_type = "col") 
+
+crosstab_ethnicity_cyber_business_weighted <- pollster::crosstab(df = omni_pass_df, x = q30, 
+         y = ethnicity_5, weight = full_weight, 
+         pct_type = "col") 
+
+crosstab_water_cyber_individual_weighted <- pollster::crosstab(df = omni_pass_df, x = q29, 
+         y = q27, weight = full_weight, 
+         pct_type = "col") 
+
+crosstab_water_cyber_business_weighted <- pollster::crosstab(df = omni_pass_df, x = q30, 
+         y = q27, weight = full_weight, 
+         pct_type = "col") 
+
+crosstab_educ4_cyber_individual_weighted <- pollster::crosstab(df = omni_pass_df, x = q29, 
+         y = educ4, weight = full_weight, 
+         pct_type = "col") 
+
+crosstab_educ4_cyber_business_weighted <- pollster::crosstab(df = omni_pass_df, x = q30, 
+         y = educ4, weight = full_weight, 
+         pct_type = "col") 
+```
+
+
+#### Formatting
+
+```{r}
+format_crosstab <- function(crosstab_df, question_name = NULL) {
+  
+  crosstab_df[nrow(crosstab_df), 1] <- "Total respondents"
+  
+  n_rows <- nrow(crosstab_df)
+  
+  crosstab_df %>%
+    mutate(across(-1, ~ ifelse(row_number() < n_rows, paste0(format(round(. , 1), nsmall = 1), "%"), as.character(.)))) %>%
+    rename_with(~ question_name, colnames(crosstab_df)[1])
+}
+```
+
+```{r}
+format_crosstab <- function(crosstab_df, question_name = NULL) {
+  
+  crosstab_df[nrow(crosstab_df), 1] <- "Total respondents"
+  
+  n_rows <- nrow(crosstab_df)
+  
+  formatted_df <- crosstab_df %>%
+    mutate(across(-1, ~ ifelse(row_number() < n_rows, paste0(format(round(. , 1), nsmall = 1), "%"), as.character(round(., 0))))) %>%
+    
+    rename_with(~ question_name, colnames(crosstab_df)[1])
+  
+  return(formatted_df)
+}
+```
+
+
+```{r}
+ft_crosstab_educ4_cyber_business_weighted <- create_flextable(format_crosstab(crosstab_educ4_cyber_business_weighted, question_name = "Q: Cyber threat to U.S. businesses"), caption = "Cyber threat perception by respondent education, Weighted", footer_lines = "*Margin of Error =6.089%")
+
+ft_crosstab_educ4_cyber_individual_weighted <- create_flextable(format_crosstab(crosstab_educ4_cyber_individual_weighted, question_name = "Q: Cyber threat to U.S. individuals"), caption = "Cyber threat perception by respondent education, Weighted", footer_lines = "*Margin of Error =6.089%")
+
+ft_crosstab_water_cyber_business_weighted <- create_flextable(format_crosstab(crosstab_water_cyber_business_weighted, question_name = "Q: Cyber threat to U.S. businesses"), caption = "Cyber threat perception by respondent water consumption, Weighted", footer_lines = "*Margin of Error =6.089%")
+
+ft_crosstab_water_cyber_individual_weighted <- create_flextable(format_crosstab(crosstab_water_cyber_individual_weighted, question_name = "Q: Cyber threat to U.S. individuals"), caption = "Cyber threat perception by respondent water consumption, Weighted", footer_lines = "*Margin of Error =6.089%")
+
+ft_crosstab_ethnicity_cyber_business_weighted <- create_flextable(format_crosstab(crosstab_ethnicity_cyber_business_weighted, question_name = "Q: Cyber threat to U.S. businesses"), caption = "Cyber threat perception by respondent ethnicity, Weighted", footer_lines = "*Margin of Error =6.089%")
+
+ft_crosstab_ethnicity_cyber_individual_weighted <- create_flextable(format_crosstab(crosstab_ethnicity_cyber_individual_weighted, question_name = "Q: Cyber threat to U.S. individuals"), caption = "Cyber threat perception by respondent ethnicity, Weighted", footer_lines = "*Margin of Error =6.089%")
+
+ft_crosstab_age_cyber_business_weighted <- create_flextable(format_crosstab(crosstab_age_cyber_business_weighted, question_name = "Q: Cyber threat to U.S. businesses"), caption = "Cyber threat perception by respondent age, Weighted", footer_lines = "*Margin of Error =6.089%")
+
+ft_crosstab_age_cyber_individual_weighted <- create_flextable(format_crosstab(crosstab_age_cyber_individual_weighted, question_name = "Q: Cyber threat to U.S. individuals"), caption = "Cyber threat perception by respondent age, Weighted", footer_lines = "*Margin of Error =6.089%")
+
+```
+
+## Export
+
+```{r}
+save_as_docx(
+  "Table 1" = ft_crosstab_age_cyber_business_weighted, 
+  path = "ft_crosstab_age_cyber_business_weighted.docx")
+```
+
+```{r}
+### Correlation matrix and more
+
+#Run correlations between your variables 
+  omni_pass <- omni_pass %>% #Explicitly making the values -1/-9 NA 
+    mutate(hhi = replace(hhi, hhi ==-3105, NA)) %>%  #Removes NA from new college2 variable  
+    mutate(education = replace(education, education ==-3105, NA)) 
+
+  omni_pass <- omni_pass %>% #Explicitly making the values -1/-9 NA 
+    mutate(q34 = replace(q34, q34 ==8, NA)) %>%
+    mutate(q34 = replace(q34, q34 ==9, NA)) %>% # remove apolitical, i don't know from educational policies
+    mutate(q49 = replace(q49, q49 ==9, NA)) %>% # remove not sure from political beliefs question
+    mutate(education = replace(education, education ==-3105, NA)) 
+  
+    vars_corr <- omni_pass %>%
+    select(starts_with("q23_1"), q29, q30, q34, education, starts_with("q39"), q41, q27, q49, age, hhi) %>%
+    mutate_all(as.numeric)
+
+  # Calculate Pearson correlation matrix with NA removal
+  cor_matrix <- cor(vars_corr, method = "pearson", use = "complete.obs")
+  
+  # Print the correlation matrix
+  print(cor_matrix)
+  library(corrplot)
+  library(ggeffects)
+  # Plot the correlation matrix using corrplot
+  corrplot(cor_matrix, method = "circle")
+```
+```{r}
+#Regression between water drinking, cyber security risk assessment
+mod1 <-lm(q29 ~ q27+as.numeric(age)+as.numeric(education)+as.numeric(hhi), data=omni_pass_df)
+mod2 <-lm(q30 ~ q27+as.numeric(age)+as.numeric(education)+as.numeric(hhi), data=omni_pass_df)
+stargazer(mod1, mod2)
+```
